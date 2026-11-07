@@ -24,6 +24,10 @@ h2{font-size:1rem;color:var(--muted);font-weight:500;margin-bottom:10px}
 .t b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .t span{color:var(--muted);font-size:.875rem}
 .t div{min-width:0;flex:1}
+#yt{margin-bottom:22px}
+.vid{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000}
+.vid iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+#ytx{margin-top:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 12px;color:var(--muted)}
 .msg{color:var(--muted);padding:20px 8px}
 #bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px))}
 #bar .in{max-width:640px;margin:0 auto}
@@ -39,8 +43,12 @@ h2{font-size:1rem;color:var(--muted);font-weight:500;margin-bottom:10px}
 <body>
 <main>
   <h1>Tunebox</h1>
-  <p class="sub">Search any song and play it. Full tracks from Audius, previews from iTunes.</p>
-  <form id="f"><input id="q" type="search" placeholder="Search songs or artists" aria-label="Search songs or artists"><button>Search</button></form>
+  <p class="sub">Search any song and play it. Search songs, or paste a YouTube link to play the full video.</p>
+  <form id="f"><input id="q" type="search" placeholder="Search songs or paste a YouTube link" aria-label="Search songs or paste a YouTube link"><button>Search</button></form>
+  <div id="yt" hidden>
+    <div class="vid"><iframe id="yf" title="YouTube player" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+    <button id="ytx" type="button">Close video</button>
+  </div>
   <h2 id="h">Trending now</h2>
   <div id="list"><p class="msg">Loading…</p></div>
 </main>
@@ -74,6 +82,17 @@ async function api(path) {
   }
   throw new Error("Server not reachable");
 }
+function ytId(u) {
+  const m = u.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([\w-]{11})/);
+  return m ? m[1] : null;
+}
+function showYT(id) {
+  a.pause();
+  $("yf").src = `https://www.youtube.com/embed/${id}?autoplay=1&rel=0`;
+  $("yt").hidden = false;
+}
+function hideYT() { $("yf").src = "about:blank"; $("yt").hidden = true; }
+$("ytx").onclick = hideYT;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function render() {
   const L = $("list");
@@ -104,6 +123,7 @@ async function load(q) {
 function play(i) {
   const t = tracks[i]; if (!t) return;
   cur = i;
+  hideYT();
   a.src = t.src || `${host}/v1/tracks/${t.id}/stream?app_name=${APP}`;
   a.play().catch(() => {});
   $("nt").innerHTML = `${esc(t.title)}<small>${esc(t.name)}</small>`;
@@ -113,7 +133,7 @@ function play(i) {
   if ("mediaSession" in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: t.title, artist: t.name, artwork: img ? [{src: img}] : []});
 }
 $("list").onclick = e => { const b = e.target.closest(".t"); if (b) play(+b.dataset.i); };
-$("f").onsubmit = e => { e.preventDefault(); const q = $("q").value.trim(); load(q); };
+$("f").onsubmit = e => { e.preventDefault(); const q = $("q").value.trim(); const id = ytId(q); if (id) { showYT(id); $("q").value = ""; } else load(q); };
 $("pp").onclick = () => { if (cur < 0 && tracks.length) play(0); else a.paused ? a.play() : a.pause(); };
 $("next").onclick = () => tracks.length && play((cur + 1) % tracks.length);
 $("prev").onclick = () => tracks.length && play((cur - 1 + tracks.length) % tracks.length);
