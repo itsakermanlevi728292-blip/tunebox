@@ -39,7 +39,7 @@ h2{font-size:1rem;color:var(--muted);font-weight:500;margin-bottom:10px}
 <body>
 <main>
   <h1>Tunebox</h1>
-  <p class="sub">Search any song and play it. No account, no API key.</p>
+  <p class="sub">Search any song and play it. Full tracks from Audius, previews from iTunes.</p>
   <form id="f"><input id="q" type="search" placeholder="Search songs or artists" aria-label="Search songs or artists"><button>Search</button></form>
   <h2 id="h">Trending now</h2>
   <div id="list"><p class="msg">Loading…</p></div>
@@ -79,28 +79,41 @@ function render() {
   const L = $("list");
   if (!tracks.length) { L.innerHTML = '<p class="msg">No songs found. Try another name.</p>'; return; }
   L.innerHTML = tracks.map((t, i) => {
-    const img = t.artwork && (t.artwork["150x150"] || t.artwork["480x480"]);
-    return `<button class="t${i === cur ? " on" : ""}" data-i="${i}">${img ? `<img src="${esc(img)}" alt="">` : '<div class="ph"></div>'}<div><b>${esc(t.title)}</b><span>${esc(t.user.name)}</span></div></button>`;
+    const img = t.art;
+    return `<button class="t${i === cur ? " on" : ""}" data-i="${i}">${img ? `<img src="${esc(img)}" alt="">` : '<div class="ph"></div>'}<div><b>${esc(t.title)}</b><span>${esc(t.name)}${t.preview ? " (30s preview)" : ""}</span></div></button>`;
   }).join("");
 }
-async function load(path, title) {
-  $("h").textContent = title; $("list").innerHTML = '<p class="msg">Loading…</p>';
-  try { tracks = await api(path); cur = -1; render(); }
-  catch (e) { $("list").innerHTML = '<p class="msg">Could not load songs. Check your connection and search again.</p>'; }
+const fromAudius = t => ({id: t.id, title: t.title, name: t.user.name, art: t.artwork && (t.artwork["150x150"] || t.artwork["480x480"]), src: null});
+const fromItunes = r => ({title: r.trackName, name: r.artistName, art: r.artworkUrl100, src: r.previewUrl, preview: true});
+async function itunes(q) {
+  const r = await fetch(`https://itunes.apple.com/search?media=music&entity=song&limit=25&term=${encodeURIComponent(q)}`);
+  return (await r.json()).results.filter(x => x.previewUrl).map(fromItunes);
+}
+async function load(q) {
+  $("h").textContent = q ? `Results for “${q}”` : "Trending now";
+  $("list").innerHTML = '<p class="msg">Loading…</p>';
+  const jobs = q
+    ? [api(`/tracks/search?query=${encodeURIComponent(q)}`).then(d => d.map(fromAudius)), itunes(q)]
+    : [api("/tracks/trending").then(d => d.map(fromAudius))];
+  const res = await Promise.allSettled(jobs);
+  tracks = res.flatMap(r => r.status === "fulfilled" ? r.value : []);
+  cur = -1;
+  if (!tracks.length && res.every(r => r.status === "rejected")) $("list").innerHTML = '<p class="msg">Could not load songs. Check your connection and search again.</p>';
+  else render();
 }
 function play(i) {
   const t = tracks[i]; if (!t) return;
   cur = i;
-  a.src = `${host}/v1/tracks/${t.id}/stream?app_name=${APP}`;
+  a.src = t.src || `${host}/v1/tracks/${t.id}/stream?app_name=${APP}`;
   a.play().catch(() => {});
-  $("nt").innerHTML = `${esc(t.title)}<small>${esc(t.user.name)}</small>`;
-  const img = t.artwork && (t.artwork["150x150"] || t.artwork["480x480"]);
+  $("nt").innerHTML = `${esc(t.title)}<small>${esc(t.name)}</small>`;
+  const img = t.art;
   $("art").src = img || $("art").src;
   render();
-  if ("mediaSession" in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: t.title, artist: t.user.name, artwork: img ? [{src: img}] : []});
+  if ("mediaSession" in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: t.title, artist: t.name, artwork: img ? [{src: img}] : []});
 }
 $("list").onclick = e => { const b = e.target.closest(".t"); if (b) play(+b.dataset.i); };
-$("f").onsubmit = e => { e.preventDefault(); const q = $("q").value.trim(); q ? load(`/tracks/search?query=${encodeURIComponent(q)}`, `Results for “${q}”`) : load("/tracks/trending", "Trending now"); };
+$("f").onsubmit = e => { e.preventDefault(); const q = $("q").value.trim(); load(q); };
 $("pp").onclick = () => { if (cur < 0 && tracks.length) play(0); else a.paused ? a.play() : a.pause(); };
 $("next").onclick = () => tracks.length && play((cur + 1) % tracks.length);
 $("prev").onclick = () => tracks.length && play((cur - 1 + tracks.length) % tracks.length);
@@ -109,7 +122,7 @@ a.onpause = () => $("pp").textContent = "▶";
 a.onended = () => $("next").click();
 a.ontimeupdate = () => { if (a.duration) $("seek").value = a.currentTime / a.duration * 100; };
 $("seek").oninput = () => { if (a.duration) a.currentTime = $("seek").value / 100 * a.duration; };
-load("/tracks/trending", "Trending now");
+load("");
 </script>
 </body>
 </html>
