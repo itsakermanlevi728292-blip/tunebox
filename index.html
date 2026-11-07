@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tunebox</title>
+<style>
+:root{--bg:#101326;--surface:#1a1f3a;--line:#2b3157;--text:#e9e8f2;--muted:#9aa0c4;--accent:#7c9cff;--hot:#ff8fa3}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding-bottom:110px}
+main{max-width:640px;margin:0 auto;padding:28px 16px}
+h1{font-size:2.2rem;letter-spacing:-.03em;margin-bottom:4px}
+.sub{color:var(--muted);margin-bottom:20px}
+form{display:flex;gap:8px;margin-bottom:22px}
+input{flex:1;min-width:0;background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:12px 14px;font-size:1rem}
+button{font:inherit;cursor:pointer;border:0;color:inherit}
+form button{background:var(--accent);color:#0b1030;font-weight:600;border-radius:10px;padding:0 18px}
+:focus-visible{outline:2px solid var(--hot);outline-offset:2px}
+h2{font-size:1rem;color:var(--muted);font-weight:500;margin-bottom:10px}
+.t{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;padding:8px;border-radius:10px}
+.t:hover{background:var(--surface)}
+.t.on{background:var(--surface);box-shadow:inset 3px 0 var(--hot)}
+.t img,.ph{width:52px;height:52px;border-radius:8px;object-fit:cover;background:var(--line);flex:none}
+.t b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t span{color:var(--muted);font-size:.875rem}
+.t div{min-width:0;flex:1}
+.msg{color:var(--muted);padding:20px 8px}
+#bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px))}
+#bar .in{max-width:640px;margin:0 auto}
+#now{display:flex;align-items:center;gap:10px}
+#now img{width:44px;height:44px;border-radius:8px;background:var(--line)}
+#nt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#nt small{display:block;color:var(--muted)}
+.c{background:var(--line);width:42px;height:42px;border-radius:50%;font-size:1.1rem}
+#pp{background:var(--accent);color:#0b1030}
+#seek{width:100%;margin-top:8px;accent-color:var(--hot)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Tunebox</h1>
+  <p class="sub">Search any song and play it. No account, no API key.</p>
+  <form id="f"><input id="q" type="search" placeholder="Search songs or artists" aria-label="Search songs or artists"><button>Search</button></form>
+  <h2 id="h">Trending now</h2>
+  <div id="list"><p class="msg">Loading…</p></div>
+</main>
+
+<div id="bar"><div class="in">
+  <div id="now">
+    <img id="art" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">
+    <div id="nt">Pick a song to start</div>
+    <button class="c" id="prev" aria-label="Previous">⏮</button>
+    <button class="c" id="pp" aria-label="Play or pause">▶</button>
+    <button class="c" id="next" aria-label="Next">⏭</button>
+  </div>
+  <input id="seek" type="range" min="0" max="100" value="0" aria-label="Seek">
+</div></div>
+<audio id="a" preload="none"></audio>
+
+<script>
+const APP = "tunebox";
+const HOSTS = ["https://api.audius.co", "https://discoveryprovider.audius.co"];
+const $ = id => document.getElementById(id);
+const a = $("a"); let tracks = [], cur = -1, host = HOSTS[0];
+
+async function api(path) {
+  for (const h of [host, ...HOSTS.filter(x => x !== host)]) {
+    try {
+      const r = await fetch(`${h}/v1${path}${path.includes("?") ? "&" : "?"}app_name=${APP}`);
+      if (!r.ok) throw 0;
+      host = h;
+      return (await r.json()).data;
+    } catch (e) {}
+  }
+  throw new Error("Server not reachable");
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function render() {
+  const L = $("list");
+  if (!tracks.length) { L.innerHTML = '<p class="msg">No songs found. Try another name.</p>'; return; }
+  L.innerHTML = tracks.map((t, i) => {
+    const img = t.artwork && (t.artwork["150x150"] || t.artwork["480x480"]);
+    return `<button class="t${i === cur ? " on" : ""}" data-i="${i}">${img ? `<img src="${esc(img)}" alt="">` : '<div class="ph"></div>'}<div><b>${esc(t.title)}</b><span>${esc(t.user.name)}</span></div></button>`;
+  }).join("");
+}
+async function load(path, title) {
+  $("h").textContent = title; $("list").innerHTML = '<p class="msg">Loading…</p>';
+  try { tracks = await api(path); cur = -1; render(); }
+  catch (e) { $("list").innerHTML = '<p class="msg">Could not load songs. Check your connection and search again.</p>'; }
+}
+function play(i) {
+  const t = tracks[i]; if (!t) return;
+  cur = i;
+  a.src = `${host}/v1/tracks/${t.id}/stream?app_name=${APP}`;
+  a.play().catch(() => {});
+  $("nt").innerHTML = `${esc(t.title)}<small>${esc(t.user.name)}</small>`;
+  const img = t.artwork && (t.artwork["150x150"] || t.artwork["480x480"]);
+  $("art").src = img || $("art").src;
+  render();
+  if ("mediaSession" in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: t.title, artist: t.user.name, artwork: img ? [{src: img}] : []});
+}
+$("list").onclick = e => { const b = e.target.closest(".t"); if (b) play(+b.dataset.i); };
+$("f").onsubmit = e => { e.preventDefault(); const q = $("q").value.trim(); q ? load(`/tracks/search?query=${encodeURIComponent(q)}`, `Results for “${q}”`) : load("/tracks/trending", "Trending now"); };
+$("pp").onclick = () => { if (cur < 0 && tracks.length) play(0); else a.paused ? a.play() : a.pause(); };
+$("next").onclick = () => tracks.length && play((cur + 1) % tracks.length);
+$("prev").onclick = () => tracks.length && play((cur - 1 + tracks.length) % tracks.length);
+a.onplay = () => $("pp").textContent = "⏸";
+a.onpause = () => $("pp").textContent = "▶";
+a.onended = () => $("next").click();
+a.ontimeupdate = () => { if (a.duration) $("seek").value = a.currentTime / a.duration * 100; };
+$("seek").oninput = () => { if (a.duration) a.currentTime = $("seek").value / 100 * a.duration; };
+load("/tracks/trending", "Trending now");
+</script>
+</body>
+</html>
